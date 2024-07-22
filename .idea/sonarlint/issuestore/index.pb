@@ -13,3 +13,5 @@ H
 src/get_rates_from_db.py,f/2/f2a6cb266ec63d22ee1e2d214fb97d1de912e3db
 O
 tests/test_get_rates_from_db.py,3/3/339cad3a6f117ec4fc8bb215d4497eecb121335c
+M
+requirements-lib_requests.txt,d/a/da25e2916898309496241fb2bd26ead272218435

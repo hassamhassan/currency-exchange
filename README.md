@@ -104,7 +104,7 @@ curl -X GET https://<API-ID>.execute-api.us-east-1.amazonaws.com/dev/delta
   },
   "delta": {
     "NZD": 0.3,
-    "GBP": -1.3
+    "USD": -1.3
   }
 }
 ```
