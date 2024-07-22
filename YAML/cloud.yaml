@@ -1,0 +1,189 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Description: "A simple CloudFormation based on AWS lambdas, API Gateway, Cloudwatch, Iam, DynamoDB"
+
+Parameters:
+  S3BucketNameZipCode:
+    Type: String
+    Description: "S3 bucket with Lambda code"
+
+Resources:
+  CurrencyRatesTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: CurrencyRates
+      AttributeDefinitions:
+        - AttributeName: Currency
+          AttributeType: S
+        - AttributeName: Timestamp
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Currency
+          KeyType: HASH
+        - AttributeName: Timestamp
+          KeyType: RANGE
+      GlobalSecondaryIndexes:
+        - IndexName: TSIndex
+          KeySchema:
+            - AttributeName: Timestamp
+              KeyType: HASH
+          Projection:
+            ProjectionType: ALL
+
+  RequestsLayer:
+    Type: AWS::Lambda::LayerVersion
+    Properties:
+      LayerName: RequestsLayer
+      Content:
+        S3Bucket: !Ref S3BucketNameZipCode
+        S3Key: requests_layer.zip
+      CompatibleRuntimes:
+        - python3.10
+
+  GetRatesFromUrl:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: get_rates_from_url.get_exchange_rates
+      Role: !GetAtt LambdaExecuteRole.Arn
+      Code:
+        S3Bucket: !Ref S3BucketNameZipCode
+        S3Key: get_rates_from_url.zip
+      Runtime: python3.10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref CurrencyRatesTable
+      Layers:
+        - !Ref RequestsLayer
+
+  LogGroupRatesFromUrl:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${GetRatesFromUrl}'
+      RetentionInDays: 30
+
+  GetCurrencyRatesFromUrlCron:
+    Type: AWS::Events::Rule
+    Properties:
+      ScheduleExpression: 'cron(0 12 * * ? *)'
+      Targets:
+        - Arn: !GetAtt GetRatesFromUrl.Arn
+          Id: GetCurrencyRatesFromUrlTarget
+
+  GetCurrencyRatesFromUrlPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GetRatesFromUrl.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: 'events.amazonaws.com'
+      SourceArn: !GetAtt GetCurrencyRatesFromUrlCron.Arn
+
+  GetRatesFromDB:
+    Type: AWS::Lambda::Function
+    Properties:
+      Handler: get_rates_from_db.get_rates_delta
+      Role: !GetAtt LambdaExecuteRole.Arn
+      Code:
+        S3Bucket: !Ref S3BucketNameZipCode
+        S3Key: get_rates_from_db.zip
+      Runtime: python3.10
+      Environment:
+        Variables:
+          TABLE_NAME: !Ref CurrencyRatesTable
+      Layers:
+        - !Ref RequestsLayer
+
+  LogGroupRatesFromDB:
+    Type: AWS::Logs::LogGroup
+    Properties:
+      LogGroupName: !Sub '/aws/lambda/${GetRatesFromDB}'
+      RetentionInDays: 30
+
+  ApiGatewayPermission:
+    Type: AWS::Lambda::Permission
+    Properties:
+      FunctionName: !GetAtt GetRatesFromDB.Arn
+      Action: 'lambda:InvokeFunction'
+      Principal: 'apigateway.amazonaws.com'
+      SourceArn: !Sub "arn:aws:execute-api:${AWS::Region}:${AWS::AccountId}:${APIGateway}/*/GET/delta"
+
+  LambdaExecuteRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Service: lambda.amazonaws.com
+            Action: sts:AssumeRole
+      Policies:
+        - PolicyName: DynamoDBPolicy
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - dynamodb:Query
+                  - dynamodb:PutItem
+                  - dynamodb:BatchWriteItem
+                Resource: '*'
+        - PolicyName: ExecuteLambda
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - logs:CreateLogStream
+                  - logs:PutLogEvents
+                  - logs:CreateLogGroup
+                Resource: "arn:aws:logs:us-east-1:*:*"
+
+  APIGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name: CurrencyRatesAPI
+
+  ApiGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId: !Ref APIGateway
+      ParentId: !GetAtt APIGateway.RootResourceId
+      PathPart: delta
+
+  GetRatesMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId: !Ref APIGateway
+      ResourceId: !Ref ApiGatewayResource
+      HttpMethod: GET
+      AuthorizationType: NONE
+      Integration:
+        Type: AWS
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${LambdaArn}/invocations
+          - LambdaArn: !GetAtt GetRatesFromDB.Arn
+        PassthroughBehavior: WHEN_NO_MATCH
+        IntegrationResponses:
+          - StatusCode: 200
+            ResponseTemplates:
+              application/json: ""
+      MethodResponses:
+        - StatusCode: 200
+          ResponseModels:
+            application/json: Empty
+
+  ApiGatewayDeploy:
+    Type: AWS::ApiGateway::Deployment
+    DependsOn: [GetRatesMethod]
+    Properties:
+      RestApiId: !Ref APIGateway
+      StageName: dev
+
+Outputs:
+  ApiGatewayUrl:
+    Description: "API URL"
+    Value: !Sub "https://${APIGateway}.execute-api.${AWS::Region}.amazonaws.com/dev/delta"
+  RequestsLayer:
+    Description: "ARN of the Requests Layer"
+    Value: !Ref RequestsLayer
+

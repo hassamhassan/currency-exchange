@@ -1,0 +1,10 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Resources:
+  S3BucketZipCode:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: exchange-code-bucket
+Outputs:
+  S3BucketNameZipCode:
+    Description: "The bucket used for test task"
+    Value: !Ref S3BucketZipCode
