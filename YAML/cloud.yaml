@@ -11,6 +11,7 @@ Resources:
     Type: AWS::DynamoDB::Table
     Properties:
       TableName: CurrencyRates
+      BillingMode: PAY_PER_REQUEST
       AttributeDefinitions:
         - AttributeName: Currency
           AttributeType: S
