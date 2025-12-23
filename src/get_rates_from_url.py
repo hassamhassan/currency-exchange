@@ -11,7 +11,7 @@ import requests
 
 def get_exchange_rates(event, context):
     """
-    This Lambda handler function is triggered by an event.
+    This Lambda handler function is triggered by event.
     Get the exchange rate xml data from the European Central Bank and stores it in DynamoDB.
 
     Args:
